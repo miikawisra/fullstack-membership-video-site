@@ -1,8 +1,12 @@
 from passlib.context import CryptContext
 from jose import jwt
 from datetime import datetime, timedelta
+import os
+from dotenv import load_dotenv
 
-SECRET_KEY = "SUPER_SECRET"
+load_dotenv()  # Tämä täytyy tulla ennen getenv!
+
+SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -16,10 +20,11 @@ def verify_password(plain_password, hashed_password):
 def create_jwt(email: str, is_premium: bool):
     payload = {
         "sub": email,
-        "premium": is_premium,
+        "premium": is_premium,  # claim nimi on "premium"
         "exp": datetime.utcnow() + timedelta(hours=6)
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
 
 def decode_jwt(token: str):
     return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])

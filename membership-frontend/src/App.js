@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import Login from './Login'
 import Register from './Register'
 import Dashboard from './Dashboard'
+import PremiumPost from './PremiumPost'
 
 
 
@@ -35,6 +36,7 @@ function App() {
           token ? <Dashboard onLogout={handleLogout} /> : <Navigate to="/" replace />
         } />
         <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="/premium-post" element={<PremiumPost />} />
       </Routes>
     </Router>
   )
