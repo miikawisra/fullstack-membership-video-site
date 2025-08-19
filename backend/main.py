@@ -12,7 +12,10 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from fastapi.staticfiles import StaticFiles
 from typing import List
+import stripe
+from fastapi import Request
 
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 router = APIRouter()
 
 load_dotenv()  # lataa .env-tiedoston arvot ympäristömuuttujiin
@@ -21,6 +24,8 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 # OAuth2 tunnistusmekanismi, tokenin vastaanotto headerista
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
+
+app = FastAPI()
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     credentials_exception = HTTPException(
@@ -41,10 +46,64 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credentials_exception
     return user
 
+@app.post("/create-checkout-session")
+async def create_checkout_session(current_user: User = Depends(get_current_user)):
+    try:
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price': os.getenv("STRIPE_PRICE_ID"),  # luodun 1€ tuotteen price_id
+                'quantity': 1,
+            }],
+            mode='payment',
+            success_url="http://localhost:3000/success",
+            cancel_url="http://localhost:3000/cancel",
+            metadata={"user_id": current_user.id}
+        )
+        return {"id": checkout_session.id}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# Webhook vastaanottaa tiedon kun maksu onnistuu
+@app.post("/webhook")
+async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+    endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+    except stripe.error.SignatureVerificationError:
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    if event['type'] == 'checkout.session.completed':
+        session = event['data']['object']
+        user_id = session['metadata']['user_id']
+
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            user.is_premium = True
+            db.commit()
+
+    return {"status": "success"}
+
+
+
+router = APIRouter()
+
+load_dotenv()  # lataa .env-tiedoston arvot ympäristömuuttujiin
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = "HS256"
+# OAuth2 tunnistusmekanismi, tokenin vastaanotto headerista
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
+
+
+
 # Luo taulut tietokantaan, jos niitä ei ole
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI()
+
 
 origins = [
     "http://localhost:3000",  # frontendin osoite
@@ -124,22 +183,19 @@ def get_db():
 # Rekisteröi käyttäjä
 @app.post("/register")
 def register(user: UserCreate, db: Session = Depends(get_db)):
-    try:
-        existing_user = db.query(User).filter(User.email == user.email).first()
-        if existing_user:
-            raise HTTPException(status_code=400, detail="Sähköposti on jo käytössä")
+    existing_user = db.query(User).filter(User.email == user.email).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Sähköposti on jo käytössä")
 
-        hashed_pw = hash_password(user.password)
-        new_user = User(email=user.email, hashed_password=hashed_pw)
+    hashed_pw = hash_password(user.password)
+    new_user = User(email=user.email, hashed_password=hashed_pw)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
 
-        db.add(new_user)
-        db.commit()
-        db.refresh(new_user)
+    token = create_jwt(new_user.email, new_user.is_premium)
+    return {"msg": "Käyttäjä luotu onnistuneesti", "access_token": token}
 
-        return {"msg": "Käyttäjä luotu onnistuneesti"}
-    except Exception as e:
-        print("Virhe rekisteröinnissä:", e)
-        raise HTTPException(status_code=500, detail="Sisäinen palvelinvirhe")
 
 # Kirjaudu sisään
 @app.post("/login", response_model=Token)

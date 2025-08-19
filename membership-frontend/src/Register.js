@@ -1,12 +1,15 @@
-// Register.js
 import React, { useState } from 'react'
 import './Register.css'
 import { useNavigate, Link } from 'react-router-dom'
+import { loadStripe } from "@stripe/stripe-js";
+
+const stripePromise = loadStripe("pk_live_51OYpnXJltAvlqMW0lvzXGgiceH7JESMMrN6fIdWvituZhKdiBVETqwXTUUFRDGzwherXVuDwLTSggnUGaWqvq5Xu00iWKqq9dA");
 
 function Register() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [wantsPremium, setWantsPremium] = useState(false)
   const navigate = useNavigate()
 
   const handleSubmit = async (e) => {
@@ -18,20 +21,56 @@ function Register() {
     }
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/register', {
+      // 1. Rekisteröinti
+      const registerRes = await fetch('http://127.0.0.1:8000/register', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       })
 
-      if (response.ok) {
-        alert('Rekisteröinti onnistui!')
-        navigate('/') // takaisin login-sivulle
-      } else {
+      if (!registerRes.ok) {
         alert('Rekisteröinti epäonnistui')
+        return
       }
+
+      alert('Rekisteröinti onnistui!')
+
+      // 2. Automaattinen login tokenin saamiseksi
+      const loginRes = await fetch('http://127.0.0.1:8000/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
+
+      if (!loginRes.ok) {
+        alert('Login epäonnistui')
+        return
+      }
+
+      const loginData = await loginRes.json()
+      const token = loginData.access_token
+      localStorage.setItem("token", token)
+
+      // 3. Premium-valinta → Stripe Checkout
+      if (wantsPremium) {
+        const res = await fetch("http://localhost:8000/create-checkout-session", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${token}` },
+        })
+
+        if (!res.ok) {
+          alert("Stripe-session luonti epäonnistui")
+          return
+        }
+
+        const data = await res.json()
+        const stripe = await stripePromise
+        await stripe.redirectToCheckout({ sessionId: data.id })
+      } else {
+        // Ei premium → takaisin login-sivulle
+        navigate('/')
+      }
+
     } catch (error) {
       console.error('Register error:', error)
       alert('Virhe rekisteröinnissä')
@@ -63,8 +102,20 @@ function Register() {
           onChange={(e) => setConfirmPassword(e.target.value)}
           required
         />
-        <button type="submit">Rekisteröidy</button>
+
+        <div className="register_premium">
+          <input
+            type="checkbox"
+            id="premium-checkbox"
+            checked={wantsPremium}
+            onChange={(e) => setWantsPremium(e.target.checked)}
+          />
+          <label htmlFor="premium-checkbox">Haluan premiumin (1€)</label>
+        </div>
+
+        <button className="premium_button" type="submit">Rekisteröidy</button>
       </form>
+
       <p>Onko sinulla jo tunnus? <Link to="/">Kirjaudu</Link></p>
     </div>
   )

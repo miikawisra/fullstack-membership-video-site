@@ -6,6 +6,24 @@ body {
     background-attachment: fixed;
 }
 
+.register_premium {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.register_premium input[type="checkbox"] {
+
+    margin: 0;
+    /* position: relative; */
+    /* top: 2px; */
+}
+
+
+.premium_button {
+    margin: 20px;
+}
+
 .register-container {
     max-width: 400px;
     margin: 80px auto;
